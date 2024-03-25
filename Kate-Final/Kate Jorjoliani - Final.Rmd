@@ -1,0 +1,482 @@
+---
+title: "Final"
+output: html_notebook
+---
+data preparation, exploratory data analysis (EDA), model building, and evaluation
+
+Data Preparation
+Load the libraries
+```{r}
+options(scipen = 99)
+library(ggplot2)
+library(ggpubr)
+library(reshape2)
+library(caret)
+library(pROC)
+library(lattice)
+```
+
+```{r}
+df = health
+```
+
+Clean the dataset if there are any missing values
+```{r}
+df <- na.omit(df)
+```
+
+Remove unneccesary and problematic variables
+```{r}
+df$Timestamp = NULL
+df$What.is.your.course. = NULL
+```
+
+Find the string of the dataset to get an overview of the data
+```{r}
+str(df)
+```
+We see descriptions of each variable, whether it is an integer or a factor... We converted strings into factors when importing data therefore most of them are factors which will make our data analysis easier...
+
+Exploratory Data Analysis
+
+Rename columns to easier names
+```{r}
+names(df)[names(df) == "Choose.your.gender"] <- "gender"
+names(df)[names(df) == "Your.current.year.of.Study"] <- "year"
+names(df)[names(df) == "What.is.your.CGPA."] <- "CGPA"
+names(df)[names(df) == "Marital.status"] <- "married"
+names(df)[names(df) == "Do.you.have.Depression."] <- "depression"
+names(df)[names(df) == "Do.you.have.Anxiety."] <- "anxiety"
+names(df)[names(df) == "Do.you.have.Panic.attack."] <- "panic_attack"
+names(df)[names(df) == "Did.you.seek.any.specialist.for.a.treatment."] <- "seek_help"
+```
+
+Turn 'yes' and 'no' variables to 1 and 0.
+```{r}
+df$married <- ifelse(df$married == "Yes", 1, 0)
+df$depression <- ifelse(df$depression == "Yes", 1, 0)
+df$anxiety <- ifelse(df$anxiety == "Yes", 1, 0)
+df$panic_attack <- ifelse(df$panic_attack == "Yes", 1, 0)
+df$seek_help <- ifelse(df$seek_help == "Yes", 1, 0)
+```
+
+View the summary of the dataset
+```{r}
+summary(df)
+```
+
+Visualize the summary
+
+Create ggplots for each variable and see the distribution
+
+```{r}
+ggplot(df, aes(x = Age)) +
+  geom_histogram(binwidth = 1, fill = "orange") +
+  labs(title = "Age Distribution")
+```
+
+```{r}
+ggplot(df, aes(x = CGPA)) +
+  geom_bar(fill = "chartreuse3") +
+  labs(title = "CGPA Distribution")
+```
+
+```{r}
+ggplot(df, aes(x = married)) +
+  geom_bar(fill = "cadetblue") +
+  labs(title = "Marital Status Distribution")
+```
+
+```{r}
+df_long <- tidyr::pivot_longer(df, 
+  cols = c(depression, anxiety, panic_attack),
+  names_to = "Variable", 
+  values_to = "Response"
+)
+
+ggplot(df_long, aes(x = Response, fill = Variable)) +
+  geom_bar() +
+  labs(title = "Mental Health Distribution", x = "Response") +
+  scale_fill_manual(values = c("depression" = "darkslategray1", 
+                               "anxiety" = "cornflowerblue", 
+                               "panic_attack" = "darkorchid1"))
+```
+
+Make visualizations
+```{r}
+data <- data.frame(
+  x = df$anxiety,
+  y = df$CGPA,
+  value = df$Age
+)
+
+ggplot(data, aes(x = x, y = y, size = value)) +
+  geom_point(shape = 21, fill = "red", color = "black", alpha = 0.7) +
+  scale_size_continuous(range = c(5, 15)) +
+  labs(
+    title = "Bubble Plot",
+    x = "Anxiety",
+    y = "CGPA",
+  )
+```
+
+```{r}
+data <- data.frame(
+  x = df$anxiety,
+  y = df$depression,
+  value = df$married
+)
+
+ggplot(data, aes(x = x, y = y, size = value)) +
+  geom_point(shape = 21, fill = "red", color = "black", alpha = 0.7) +
+  scale_size_continuous(range = c(5, 15)) +
+  labs(
+    title = "Bubble Plot",
+    x = "Anxiety",
+    y = "Depression",
+  )
+```
+
+```{r}
+data <- data.frame(
+  x = df$anxiety,
+  y = df$gender,
+  value = df$Age
+)
+
+ggplot(data, aes(x = x, y = y, size = value)) +
+  geom_point(shape = 21, fill = "red", color = "black", alpha = 0.7) +
+  scale_size_continuous(range = c(5, 15)) +
+  labs(
+    title = "Bubble Plot",
+    x = "Anxiety",
+    y = "Gender",
+  )
+```
+
+Find mean and Standard Deviation for numeric variables
+```{r}
+numeric_cols <- sapply(df, is.numeric)
+means <- colMeans(df[, numeric_cols], na.rm = TRUE)
+sds <- apply(df[, numeric_cols], 2, sd, na.rm = TRUE)
+
+for (i in seq_along(means)) {
+  cat("Column:", names(means)[i], "\n")
+  cat("Mean:", means[i], "\n")
+  cat("Standard Deviation:", sds[i], "\n\n")
+}
+```
+
+Visualize the Mean and SD
+```{r}
+summary_data <- data.frame(
+  Variable = names(means),
+  Mean = means,
+  SD = sds
+)
+
+mean_plot <- ggplot(summary_data, aes(x = Variable, y = Mean)) +
+  geom_bar(stat = "identity", fill = "maroon") +
+  labs(title = "Mean of Numeric Columns") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+sd_plot <- ggplot(summary_data, aes(x = Variable, y = SD)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Standard Deviation of Numeric Columns") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+library(gridExtra)
+grid.arrange(mean_plot, sd_plot, ncol = 2)
+```
+
+
+Model Building
+
+Split Data
+```{r}
+test_size <- 0.2
+
+set.seed(123)
+
+data_split <- createDataPartition(df$anxiety, p = test_size, list = FALSE)
+
+training_data <- df[data_split, ]
+testing_data <- df[-data_split, ]
+```
+
+Logistic Classification
+```{r}
+model <- glm(anxiety ~., data = df, family = binomial)
+
+summary(model)
+```
+The coefficients provide information on the strength of the relationship between the predictor variables and the probability of having anxiety. The higher the estimate the stronger the relationship is towards the target variable.
+
+```{r}
+new_data <- df[, -which(names(df) == "anxiety")]
+```
+
+```{r}
+predictions <- predict(model, newdata = new_data, type = "response")
+predictions
+```
+
+Formula
+```{r}
+coefficients <- coef(model)
+
+intercept <- coefficients[1]
+other_coefficients <- coefficients[-1]
+
+equation <- paste("P(Y=1|X) = 1 / (1 + exp(-(", paste(intercept, paste(other_coefficients, collapse = " * "), sep = " + "), "))")
+
+print(equation)
+```
+
+Visualize predictions
+```{r}
+threshold <- 0.5
+
+predicted_class <- ifelse(predictions >= threshold, 1, 0)
+
+plot(1:length(predictions), predictions, type = "l", col = "blue", lwd = 2,
+     main = "Predicted Probabilities with Threshold", xlab = "Sample", ylab = "Probability")
+
+abline(h = threshold, col = "red", lty = 2)
+
+points(1:length(predictions), predictions, col = ifelse(predicted_class == 1, "green", "red"))
+
+legend("topright", legend = c("Predicted Probabilities", "Threshold"), 
+       col = c("blue", "red"), lty = c(1, 2), lwd = c(2, 1), cex = 0.8)
+```
+The red dots mean 0 and green mean 1. The red line is the threshold, if there are more red dots, there were more predictions of 0. They should fall more under the threshold.
+
+```{r}
+predicted_labels <- ifelse(predictions > 0.5, 1, 0)
+actual_labels <- df$anxiety
+
+confusion_matrix <- table(Actual = df$anxiety, Predicted = predicted_labels)
+
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+sensitivity <- confusion_matrix[2, 2] / sum(confusion_matrix[2, ])
+specificity <- confusion_matrix[1, 1] / sum(confusion_matrix[1, ])
+
+print(confusion_matrix)
+
+cat("Accuracy:", accuracy, "\n")
+cat("Sensitivity:", sensitivity, "\n")
+cat("Specificity:", specificity, "\n")
+```
+Accuracy - 69%
+
+Visual for the confusion matrix
+```{r}
+confusion_df <- as.data.frame(as.table(confusion_matrix))
+colnames(confusion_df) <- c("Predicted", "Actual", "Count")
+
+ggplot(confusion_df, aes(x = Predicted, y = Actual, fill = Count)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "red") +
+  geom_text(aes(label = Count), vjust = 1) +
+  theme_minimal() +
+  labs(title = "Confusion Matrix", x = "Predicted", y = "Actual")
+```
+Accuracy: 69%
+
+Visualizations
+ROC Curve
+```{r}
+library(pROC)
+
+roc_obj <- roc(df$anxiety, predictions)
+
+plot(roc_obj, main = "ROC Curve", print.auc = TRUE, col = "blue", print.auc.col = "red")
+
+auc_value <- auc(roc_obj)
+cat("AUC:", auc_value, "\n")
+```
+Blue line positioned closer to upper left corner - better accuracy of prediction. This curve is moderate.
+
+
+Multinomial Naive Bayes
+
+Load the neccessary library
+```{r}
+library(naivebayes)
+```
+
+Turn training data into factor and create naive bayes model
+```{r}
+training_data$anxiety <- as.factor(training_data$anxiety)
+model_MNB <- naive_bayes(anxiety ~ ., data = training_data, laplace = 1)
+```
+
+Run predictions
+```{r}
+y_pred <- predict(model_MNB, newdata = testing_data)
+y_pred
+```
+
+Visualizations
+Predictions
+```{r}
+library(ggplot2)
+predictions_df <- data.frame(Predicted = y_pred)
+
+prediction_barplot <- ggplot(data = predictions_df, aes(x = Predicted)) +
+  geom_bar(fill = "darkturquoise") +
+  xlab("Predicted Values") +
+  ylab("Count") +
+  ggtitle("Predicted Values Distribution")
+
+print(prediction_barplot)
+```
+Way more predicted values are 1 (yes) than 0(no).
+
+Make testing data into factor
+```{r}
+testing_data$anxiety <- as.factor(testing_data$anxiety)
+```
+
+Create confusion matrix
+```{r}
+confusion_matrix <- confusionMatrix(y_pred, testing_data$anxiety)
+confusion_matrix
+```
+Accuracy: 35%
+
+Confusion Matrix visuals
+```{r}
+confusion_df <- as.data.frame(as.table(confusion_matrix$table))
+
+ggplot(confusion_df, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "darkgreen") +
+  geom_text(aes(label = Freq), vjust = 1) +
+  theme_minimal() +
+  labs(title = "Confusion Matrix Heatmap", x = "Actual", y = "Predicted")
+```
+
+
+Bernoulli Naive Bayes
+```{r}
+library(e1071)
+```
+
+```{r}
+test_size <- 0.2
+
+set.seed(123)
+
+data_split <- createDataPartition(df$anxiety, p = test_size, list = FALSE)
+
+training_data_BNB <- df[data_split, ]
+testing_data_BNB <- df[-data_split, ]
+```
+
+```{r}
+training_data_BNB$anxiety <- as.factor(training_data_BNB$anxiety)
+
+model_BNB <- naiveBayes(anxiety ~ ., data = training_data, laplace = 1)
+```
+
+Make predictions
+```{r}
+y_pred_BNB <- predict(model_BNB, newdata = testing_data_BNB)
+y_pred_BNB
+```
+
+Visuals
+```{r}
+barplot(table(y_pred), col = c("skyblue", "blue"),
+        xlab = "Predicted Class",
+        ylab = "Frequency",
+        main = "Predicted Classes")
+
+text(1:2, table(y_pred), labels = table(y_pred), pos = 3, cex = 1.2)
+```
+
+
+```{r}
+testing_data_BNB$anxiety <- as.factor(testing_data_BNB$anxiety)
+```
+
+```{r}
+confusion_matrix <- confusionMatrix(y_pred_BNB, testing_data_BNB$anxiety)
+confusion_matrix
+```
+Accuracy: 35%
+
+Visuals
+Confusion matrix heatmap
+```{r}
+confusion_df <- as.data.frame(as.table(conf_matrix$table))
+colnames(confusion_df) <- c("Predicted", "Actual", "Count")
+
+ggplot(confusion_df, aes(x = Predicted, y = Actual, fill = Count)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "lightslateblue") +
+  geom_text(aes(label = Count), vjust = 1) +
+  theme_minimal() +
+  labs(title = "Confusion Matrix Heatmap", x = "Predicted", y = "Actual")
+```
+
+
+GBM model
+
+#Split data again if neccessary
+
+```{r}
+library(gbm)
+
+formula <- anxiety ~ .
+
+gbm_model <- gbm(formula, data = training_data, distribution = "bernoulli", n.trees = 100, interaction.depth = 4, bag.fraction = 0.7, n.minobsinnode = 5)
+
+predictions <- predict(gbm_model, newdata = testing_data, type = "response", n.trees = 100)
+
+binary_predictions <- ifelse(predictions > 0.5, 1, 0)
+
+confusion_matrix <- table(binary_predictions, testing_data$anxiety)
+print(confusion_matrix)
+
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(paste("Accuracy:", accuracy))
+```
+65% accuracy 
+
+```{r}
+TP <- confusion_matrix[2, 2]
+TN <- confusion_matrix[1, 1]
+FP <- confusion_matrix[1, 2]
+FN <- confusion_matrix[2, 1]
+
+sensitivity <- TP / (TP + FN)
+specificity <- TN / (TN + FP)
+cat("Sensitivity:", sensitivity, "\n")
+cat("Specificity:", specificity, "\n")
+```
+
+Visuals
+```{r}
+plot(predictions, type = "l", col = "blue", lwd = 2, xlab = "Observation", ylab = "Probability", main = "GBM Predictions")
+abline(h = 0.5, col = "red", lty = 2)
+legend("topright", legend = c("Predictions", "Threshold"), col = c("blue", "red"), lty = 1:2, cex = 0.8)
+```
+The red line is the threshold. Lines that are over the threshold are 1, and below - 0. There are more 0's than 1's, thus the predictions is no anxiety.
+
+Confusion Matrix Heatmap
+```{r}
+confusion_df <- as.data.frame(as.table(confusion_matrix))
+colnames(confusion_df) <- c("Predicted", "Actual", "Count")
+
+ggplot(confusion_df, aes(x = Predicted, y = Actual, fill = Count)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  geom_text(aes(label = Count), vjust = 1) +
+  theme_minimal() +
+  labs(title = "Confusion Matrix", x = "Predicted", y = "Actual")
+```
+Most are true negatives

@@ -1,0 +1,236 @@
+---
+title: "Final(notebook 2)"
+output: html_notebook
+---
+```{r}
+library(caret)
+library(ggplot2)
+library(lattice)
+library(pROC)
+```
+
+```{r}
+df = health
+```
+
+Find the string
+```{r}
+str(df)
+```
+Most are factors
+
+Drop columns
+```{r}
+df$Timestamp = NULL
+df$What.is.your.course.= NULL
+```
+
+Clean
+```{r}
+df <- na.omit(df)
+```
+
+Rename columns
+```{r}
+names(df)[names(df) == "Choose.your.gender"] <- "gender"
+names(df)[names(df) == "Your.current.year.of.Study"] <- "year"
+names(df)[names(df) == "What.is.your.CGPA."] <- "CGPA"
+names(df)[names(df) == "Marital.status"] <- "married"
+names(df)[names(df) == "Do.you.have.Depression."] <- "depression"
+names(df)[names(df) == "Do.you.have.Anxiety."] <- "anxiety"
+names(df)[names(df) == "Do.you.have.Panic.attack."] <- "panic_attack"
+names(df)[names(df) == "Did.you.seek.any.specialist.for.a.treatment."] <- "seek_help"
+```
+
+Turn 'yes' and 'no' variables to 1 and 0.
+```{r}
+df$married <- ifelse(df$married == "Yes", 1, 0)
+df$depression <- ifelse(df$depression == "Yes", 1, 0)
+df$anxiety <- ifelse(df$anxiety == "Yes", 1, 0)
+df$panic_attack <- ifelse(df$panic_attack == "Yes", 1, 0)
+df$seek_help <- ifelse(df$seek_help == "Yes", 1, 0)
+```
+
+Split data into training and testing
+```{r}
+set.seed(123)
+
+index <- createDataPartition(df$anxiety, p = 0.8, list = FALSE)
+
+train_set <- df[index, ]
+test_set <- df[-index, ]
+```
+
+
+Random Forest
+```{r}
+library(randomForest)
+```
+
+```{r}
+rf_model <- randomForest(factor(anxiety) ~ ., data = train_set, ntree = 500, mtry = sqrt(length(predictors)))
+```
+
+```{r}
+summary(rf_model)
+```
+
+Find predictions
+```{r}
+rf_predictions <- predict(rf_model, newdata = test_set, type = 'response')
+rf_predictions
+```
+
+```{r}
+str(rf_predictions)
+```
+
+Create the confusion matrix
+```{r}
+confusion_matrix <- table(Actual = test_set$anxiety, Predicted = rf_predictions)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(confusion_matrix)
+cat("Accuracy:", accuracy, "\n")
+```
+60% accuracy
+
+Find sensitivity and specificity
+```{r}
+TP <- confusion_matrix[2, 2]
+TN <- confusion_matrix[1, 1]
+FP <- confusion_matrix[1, 2]
+FN <- confusion_matrix[2, 1]
+
+sensitivity <- TP / (TP + FN)
+specificity <- TN / (TN + FP)
+
+cat("Sensitivity (True Positive Rate):", sensitivity, "\n")
+cat("Specificity (True Negative Rate):", specificity, "\n")
+```
+
+
+```{r}
+barplot(table(rf_predictions), col = c("magenta", "mistyrose"), main = "Predicted Probabilities", xlab = "Instances", ylab = "Count", legend.text = c("Class 0", "Class 1"))
+```
+
+Make ROC curve
+```{r}
+roc_curve <- roc(test_set$anxiety, as.numeric(rf_predictions))
+plot(roc_curve, main = "ROC Curve", col = "blue", lwd = 2)
+```
+Very bad curve
+
+
+Extra Trees Model
+
+Train the model
+```{r}
+et_model <- train(factor(anxiety) ~ ., data = train_set, method = "rf")
+```
+
+Predictions
+```{r}
+et_predictions <- predict(et_model, newdata = test_set)
+et_predictions
+```
+
+Create confusion matrix to see accuracy, sensitivity and specificity
+```{r}
+conf_matrix_et <- table(Actual = test_set$anxiety, Predicted = et_predictions)
+print(conf_matrix_et)
+accuracy <- sum(diag(conf_matrix_et)) / sum(conf_matrix_et)
+sensitivity <- conf_matrix_et[2, 2] / sum(conf_matrix_et[2, ])
+specificity <- conf_matrix_et[1, 1] / sum(conf_matrix_et[1, ])
+cat("Accuracy:", accuracy, "\n")
+cat("Sensitivity:", sensitivity, "\n")
+cat("Specificity:", specificity, "\n")
+```
+Accuracy 60%
+
+```{r}
+str(et_predictions)
+```
+
+Visuals
+```{r}
+barplot(table(et_predictions), col = c("mediumseagreen", "red"), main = "Predicted Probabilities", xlab = "Instances", ylab = "Count", legend.text = c("Class 0", "Class 1"))
+```
+
+```{r}
+conf_matrix_df <- as.data.frame.table(conf_matrix_et)
+ggplot(conf_matrix_df, aes(x = Predicted, y = Actual, fill = Freq)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "mistyrose3") +
+  geom_text(aes(label = Freq), vjust = 1) +
+  theme_minimal() +
+  labs(title = "Confusion Matrix Heatmap", x = "Predicted", y = "Actual")
+```
+Not a very good model. Most predictions are true negatives and then false positives.
+
+SVM Model
+```{r}
+library(e1071)
+```
+
+```{r}
+predictors <- colnames(df)[colnames(df) != "anxiety"]
+```
+
+Train the model
+```{r}
+svm_model <- svm(anxiety ~ ., data = train_set, kernel = "radial", cost = 1, gamma = 0.1)
+```
+
+Make predictions
+```{r}
+svm_predictions <- predict(svm_model, newdata = test_set[, predictors])
+svm_predictions
+```
+Round the predictions
+```{r}
+rounded_svm_predictions <- round(svm_predictions)
+rounded_svm_predictions
+```
+
+Confusion matrix
+```{r}
+confusion_matrix <- table(Actual = test_set$anxiety, Predicted = rounded_svm_predictions)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(confusion_matrix)
+cat("Accuracy:", accuracy, "\n")
+```
+50% accuracy
+
+Calculate sensitivity and specificity
+```{r}
+sensitivity <- conf_matrix[2, 2] / sum(conf_matrix[2, ])
+specificity <- conf_matrix[1, 1] / sum(conf_matrix[1, ])
+
+print(conf_matrix)
+cat("Sensitivity:", sensitivity, "\n")
+cat("Specificity:", specificity, "\n")
+```
+
+Visuals
+```{r}
+plot(rounded_svm_predictions, type = "b", col = "blue", pch = 16, xlab = "Observation", ylab = "Prediction", main = "SVM Predictions - Testing Set")
+abline(h = 0.5, col = "red", lty = 2)
+legend("topright", legend = c("Predictions", "Threshold"), col = c("blue", "red"), lty = 1:2, cex = 0.8)
+```
+Dots below the red threshold line are 0-no, and above the line are 1-yes.
+The prediction is no anxiety.
+
+Confusion matrix heatmap
+```{r}
+conf_matrix <- table(Actual = test_set$anxiety, Predicted = rounded_svm_predictions)
+
+conf_matrix_df <- as.data.frame(as.table(conf_matrix))
+
+ggplot(conf_matrix_df, aes(x = Predicted, y = Actual, fill = Freq)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "skyblue") +
+  geom_text(aes(label = Freq), vjust = 1) +
+  theme_minimal() +
+  labs(title = "Confusion Matrix Heatmap - SVM Predictions", x = "Predicted", y = "Actual")
+```
+Pretty good model, however, the accuracy is not as high as expected.
